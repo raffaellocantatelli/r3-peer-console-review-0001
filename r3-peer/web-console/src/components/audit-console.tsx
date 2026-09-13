@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   Check,
   Copy,
-  Eye,
-  EyeOff,
-  KeyRound,
+  FileJson,
+  FileText,
   LoaderCircle,
   ShieldOff,
   TriangleAlert,
@@ -12,10 +11,9 @@ import {
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { sha256Hex } from "@/lib/r3-peer/canonical";
+import { sha256Hex } from "@/lib/r3-peer/canonical.ts";
 import {
   CHALLENGE,
   CHALLENGE_EXPECTED,
@@ -25,27 +23,28 @@ import {
   DEFAULT_MAX_TOKENS,
   DEFAULT_MESSAGE,
   DEFAULT_TEMPERATURE,
+  ISSUE_HARDENING_URL,
   ISSUE_URL,
-  MODELS,
   PROTOCOL,
   TEST_ID,
-} from "@/lib/r3-peer/constants";
-import { githubComment } from "@/lib/r3-peer/github-comment";
-import { runDeepseekAudit } from "@/lib/r3-peer/run-audit";
-import type { AuditResult } from "@/lib/r3-peer/types";
+} from "@/lib/r3-peer/constants.ts";
+import { githubComment } from "@/lib/r3-peer/github-comment.ts";
+import { SAMPLE_BODY, SAMPLE_MANIFEST } from "@/lib/r3-peer/sample.ts";
+import { verifyRun } from "@/lib/r3-peer/verify.ts";
+import type { VerifyCheck, VerifyResult } from "@/lib/r3-peer/types.ts";
 import { cn } from "@/lib/utils";
 
-const REVIEW_LOCK = true;
+const PYTHON_CMD = `python scripts/api_call_audit.py --preset r3-peer-001 --api-key-env DEEPSEEK_API_KEY`;
 
 export function AuditConsole() {
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState<(typeof MODELS)[number]["id"]>("deepseek-flash");
-  const [message, setMessage] = useState(DEFAULT_MESSAGE);
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
+  const [manifestText, setManifestText] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [requestText, setRequestText] = useState("");
+  const [showRequest, setShowRequest] = useState(false);
+  const [sample, setSample] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<AuditResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<VerifyResult | null>(null);
   const [challengeOk, setChallengeOk] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -58,44 +57,45 @@ export function AuditConsole() {
     };
   }, []);
 
-  useEffect(() => {
-    const forget = () => setApiKey("");
-    window.addEventListener("pagehide", forget);
-    return () => {
-      window.removeEventListener("pagehide", forget);
-      setApiKey("");
-    };
-  }, []);
+  const canVerify = manifestText.trim().length > 2 && !busy;
 
-  const canRun =
-    !REVIEW_LOCK && apiKey.trim().length >= 8 && message.trim().length > 0 && !busy;
-
-  async function onRun() {
+  async function onVerify() {
     setBusy(true);
     setError(null);
     try {
-      const out = await runDeepseekAudit({
-        data: {
-          apiKey: apiKey.trim(),
-          message: message.trim(),
-          model,
-          baseUrl: baseUrl.trim() || DEFAULT_BASE_URL,
-          maxTokens: DEFAULT_MAX_TOKENS,
-          temperature: DEFAULT_TEMPERATURE,
-        },
+      const out = await verifyRun({
+        manifestText,
+        bodyText,
+        requestText: showRequest ? requestText : undefined,
+        sample,
       });
       setResult(out);
-      if (out.manifest.status === "ok") {
-        toast("Chiamata registrata. Status ok.");
-      } else {
-        toast("Chiamata fallita. Vedi il manifest.");
-      }
+      if (out.blocked) toast("Verifica bloccata: possibile secret nel testo.");
+      else toast("Verifica locale completata.");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg.replace(/sk-[A-Za-z0-9_-]{6,}/g, "sk-[REDACTED]"));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function loadSample() {
+    setManifestText(SAMPLE_MANIFEST);
+    setBodyText(SAMPLE_BODY);
+    setRequestText("");
+    setShowRequest(false);
+    setSample(true);
+    setResult(null);
+    toast("Esempio di simulazione caricato. Non è una chiamata reale.");
+  }
+
+  function clearAll() {
+    setManifestText("");
+    setBodyText("");
+    setRequestText("");
+    setSample(false);
+    setResult(null);
+    setError(null);
   }
 
   return (
@@ -106,129 +106,90 @@ export function AuditConsole() {
           <div className="mb-5 flex items-end justify-between gap-3">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                Sessione
+                Verifier
               </p>
-              <h2 className="font-display text-2xl font-medium tracking-tight">Esegui {TEST_ID}</h2>
+              <h2 className="font-display text-2xl font-medium tracking-tight">
+                Controlla {TEST_ID}
+              </h2>
             </div>
-            <Badge variant={REVIEW_LOCK ? "error" : "mute"}>
-              {REVIEW_LOCK ? "review lock" : "chiave non persistita"}
-            </Badge>
+            <Badge variant="ok">nessun secret</Badge>
           </div>
 
-          {REVIEW_LOCK ? (
-            <div className="mb-5 rounded-lg bg-seal/10 px-4 py-3 text-sm leading-relaxed text-seal">
-              Review R3-PEER/1.1 in corso (review-request-grok-0001). Non inserire una chiave API
-              reale in questa console finché la review indipendente non è chiusa. Il challenge SHA-256
-              resta verificabile senza chiave.
-            </div>
-          ) : null}
+          <div className="mb-5 rounded-lg bg-ok/10 px-4 py-3 text-sm leading-relaxed text-ok">
+            Questa UI non chiama DeepSeek e non accetta chiavi. Incolla i file prodotti in locale
+            dal recorder Python. Hardening:{" "}
+            <a href={ISSUE_HARDENING_URL} className="underline underline-offset-4" target="_blank" rel="noreferrer">
+              Issue #45
+            </a>
+            .
+          </div>
 
           <div className="flex flex-col gap-5">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="api-key">Chiave DeepSeek (solo sessione)</Label>
-              <div className="flex gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="api-key"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    name="deepseek-session-key"
-                    type={showKey ? "text" : "password"}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-…"
-                    className="pl-10 pr-11 font-mono"
-                    disabled={REVIEW_LOCK}
+            <PasteField
+              id="manifest"
+              label="manifest.json"
+              icon={<FileJson className="size-4" />}
+              value={manifestText}
+              accept=".json,application/json"
+              onChange={(v) => {
+                setManifestText(v);
+                setSample(false);
+              }}
+            />
+            <PasteField
+              id="body"
+              label="body.txt"
+              icon={<FileText className="size-4" />}
+              value={bodyText}
+              accept=".txt,text/plain"
+              onChange={(v) => {
+                setBodyText(v);
+                setSample(false);
+              }}
+            />
+
+            <div>
+              <button
+                type="button"
+                className="min-h-11 text-left text-sm text-muted-foreground underline-offset-4 hover:text-ink hover:underline"
+                onClick={() => setShowRequest((v) => !v)}
+              >
+                {showRequest
+                  ? "Nascondi request.json"
+                  : "Opzionale: verifica anche request.json (solo se non contiene dati personali)"}
+              </button>
+              {showRequest ? (
+                <div className="mt-3">
+                  <PasteField
+                    id="request"
+                    label="request.json"
+                    icon={<FileJson className="size-4" />}
+                    value={requestText}
+                    accept=".json,application/json"
+                    onChange={setRequestText}
                   />
-                  <button
-                    type="button"
-                    aria-label={showKey ? "Nascondi chiave" : "Mostra chiave"}
-                    onClick={() => setShowKey((v) => !v)}
-                    className="absolute top-1/2 right-1.5 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-paper-2 hover:text-ink"
-                  >
-                    {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setApiKey("");
-                    toast("Chiave cancellata dalla memoria.");
-                  }}
-                >
-                  Dimentica
-                </Button>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {REVIEW_LOCK
-                  ? "Campo disabilitato durante la review. Nessuna chiave reale richiesta."
-                  : "Transita una sola volta verso il server per la chiamata, poi sparisce. Non va in localStorage, file o registro."}
-              </p>
+              ) : null}
             </div>
 
-            <fieldset className="flex flex-col gap-2">
-              <Label>Modello</Label>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setModel(m.id)}
-                    className={cn(
-                      "rounded-lg px-3 py-3 text-left shadow-[0_0_0_1px_rgba(28,24,20,0.12)] transition-[background-color,box-shadow] duration-150",
-                      model === m.id ? "bg-ink text-paper shadow-none" : "bg-paper hover:bg-paper-2",
-                    )}
-                  >
-                    <span className="block font-mono text-[12px] font-medium">{m.label}</span>
-                    <span
-                      className={cn(
-                        "mt-1 block text-[12px] leading-snug",
-                        model === m.id ? "text-paper/70" : "text-muted-foreground",
-                      )}
-                    >
-                      {m.note}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="message">Messaggio</Label>
-              <Textarea
-                id="message"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="min-h-24 font-mono text-[13px] leading-relaxed"
-              />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="lg" disabled={!canVerify} onClick={() => void onVerify()}>
+                {busy ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" />
+                    Calcolo hash
+                  </>
+                ) : (
+                  "Verifica in locale"
+                )}
+              </Button>
+              <Button type="button" variant="outline" size="lg" onClick={loadSample}>
+                Esempio simulazione
+              </Button>
+              <Button type="button" variant="ghost" size="lg" onClick={clearAll}>
+                Pulisci
+              </Button>
             </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="base-url">Base URL</Label>
-              <Input
-                id="base-url"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                className="font-mono text-[13px]"
-              />
-              <p className="text-sm text-muted-foreground">
-                FATTO: documentazione ufficiale DeepSeek, {DEFAULT_BASE_URL}, senza /v1.
-              </p>
-            </div>
-
-            <Button type="button" size="lg" disabled={!canRun} onClick={() => void onRun()}>
-              {busy ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Chiamata in corso
-                </>
-              ) : (
-                "Esegui chiamata audit"
-              )}
-            </Button>
             {error ? (
               <p className="flex items-start gap-2 text-sm text-seal">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" />
@@ -240,11 +201,56 @@ export function AuditConsole() {
 
         <aside className="rise-in-3 flex flex-col gap-5">
           <ProtocolCard challengeOk={challengeOk} />
-          <RulesCard />
+          <CallerCard />
         </aside>
       </div>
 
       {result ? <ResultPanel result={result} /> : <EmptyLedger />}
+    </div>
+  );
+}
+
+function PasteField({
+  id,
+  label,
+  value,
+  accept,
+  icon,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  accept: string;
+  icon: ReactNode;
+  onChange: (value: string) => void;
+}) {
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    onChange(await file.text());
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id} className="flex items-center gap-2">
+          {icon}
+          {label}
+        </Label>
+        <label className="inline-flex min-h-11 cursor-pointer items-center font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground hover:text-ink">
+          Apri file
+          <input type="file" accept={accept} className="hidden" onChange={(e) => void onFile(e)} />
+        </label>
+      </div>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        className="min-h-32 font-mono text-[13px] leading-relaxed"
+      />
     </div>
   );
 }
@@ -260,26 +266,37 @@ function Header({ challengeOk }: { challengeOk: boolean | null }) {
               {PROTOCOL} · {CHANNEL_ID}
             </p>
             <h1 className="font-display text-[2rem] leading-none font-medium tracking-tight sm:text-[2.4rem]">
-              Registro di audit
+              Verifier di audit
             </h1>
           </div>
         </div>
-        <a
-          href={ISSUE_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono text-[12px] text-muted-foreground underline-offset-4 hover:text-ink hover:underline"
-        >
-          Issue #44
-        </a>
+        <div className="flex gap-3 font-mono text-[12px]">
+          <a
+            href={ISSUE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="text-muted-foreground underline-offset-4 hover:text-ink hover:underline"
+          >
+            #44
+          </a>
+          <a
+            href={ISSUE_HARDENING_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="text-muted-foreground underline-offset-4 hover:text-ink hover:underline"
+          >
+            #45
+          </a>
+        </div>
       </div>
       <p className="max-w-2xl text-base leading-relaxed text-muted-foreground">
-        Chiama DeepSeek, registra token, latenza e hash. Il costo in dollari non è un fatto: è una
-        conversione successiva dal listino. La chiave vive solo in questa sessione.
+        Un solo caller: Python, sulla macchina che detiene la chiave. Qui si verificano hash e
+        si formatta il commento. Il costo in dollari resta un’inferenza dal listino.
       </p>
       <div className="flex flex-wrap gap-2">
         <Badge variant="fatto">Fatto</Badge>
         <Badge variant="inferenza">Inferenza</Badge>
+        <Badge variant="simulazione">Simulazione</Badge>
         {challengeOk === true ? <Badge variant="ok">Challenge SHA-256 verificato</Badge> : null}
         {challengeOk === false ? <Badge variant="error">Challenge non coincide</Badge> : null}
       </div>
@@ -332,31 +349,48 @@ function ProtocolCard({ challengeOk }: { challengeOk: boolean | null }) {
   );
 }
 
-function RulesCard() {
+function CallerCard() {
+  const [copied, setCopied] = useState(false);
   return (
     <section className="rounded-xl bg-card p-4 shadow-[0_0_0_1px_rgba(28,24,20,0.1)] sm:p-5">
       <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-        Epistemica
+        Caller Python
       </p>
-      <h2 className="mt-1 font-display text-xl font-medium">Cosa copiare su GitHub</h2>
-      <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted-foreground">
+      <h2 className="mt-1 font-display text-xl font-medium">Unico processo con la chiave</h2>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        Non lanciare un run reale finché l’hardening di{" "}
+        <a href={ISSUE_HARDENING_URL} className="text-ink underline underline-offset-4" target="_blank" rel="noreferrer">
+          Issue #45
+        </a>{" "}
+        non è nel recorder canonico. Env di sessione, mai persistente.
+      </p>
+      <pre className="mt-4 overflow-auto rounded-lg bg-ink px-3 py-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-paper">
+        {PYTHON_CMD}
+      </pre>
+      <button
+        type="button"
+        className="mt-2 inline-flex min-h-11 items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground hover:text-ink"
+        onClick={async () => {
+          await navigator.clipboard.writeText(PYTHON_CMD);
+          setCopied(true);
+          toast("Comando copiato.");
+          window.setTimeout(() => setCopied(false), 1600);
+        }}
+      >
+        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? "Copiato" : "Copia comando"}
+      </button>
+      <ul className="mt-4 space-y-2 text-sm leading-relaxed text-muted-foreground">
         <li>
-          <span className="text-ink">Sì —</span> manifest.json (hash, modello, token, latenza)
+          Preset: {DEFAULT_BASE_URL}, deepseek-flash, max_tokens {DEFAULT_MAX_TOKENS}, temperature{" "}
+          {DEFAULT_TEMPERATURE}.
         </li>
+        <li className="break-words">Messaggio: {DEFAULT_MESSAGE}</li>
         <li>
-          <span className="text-ink">Sì —</span> body.txt (risposta del modello)
-        </li>
-        <li>
-          <span className="text-ink">No —</span> request.json se contiene dati personali
-        </li>
-        <li>
-          <span className="text-ink">Mai —</span> la chiave API
+          <ShieldOff className="mr-1 inline size-4 align-text-bottom" />
+          Mai la chiave, mai request.json se personale.
         </li>
       </ul>
-      <p className="mt-4 flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
-        <ShieldOff className="mt-0.5 size-4 shrink-0" />
-        Non dimostra coscienza, identità persistente, né un canale automatico fra strumenti.
-      </p>
     </section>
   );
 }
@@ -367,20 +401,18 @@ function EmptyLedger() {
       <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
         Ledger
       </p>
-      <p className="mt-2 font-display text-xl text-ink">Nessuna chiamata in questa sessione</p>
+      <p className="mt-2 font-display text-xl text-ink">Nessun file in questa sessione</p>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-        {REVIEW_LOCK
-          ? "Nessuna chiave richiesta. La review indipendente deve chiudersi prima di qualsiasi chiamata reale."
-          : "Incolla la chiave, lascia il messaggio preimpostato, esegui. Il primo test usa Flash: basta che risponda, sia tracciabile, costi poco."}
+        Incolla manifest.json e body.txt, oppure carica l’esempio di simulazione. Nessuna chiave
+        richiesta.
       </p>
     </section>
   );
 }
 
-function ResultPanel({ result }: { result: AuditResult }) {
-  const ok = result.manifest.status === "ok";
-  const manifestText = JSON.stringify(result.manifest, null, 2);
+function ResultPanel({ result }: { result: VerifyResult }) {
   const comment = useMemo(() => githubComment(result), [result]);
+  const fails = result.checks.filter((c) => c.ok === false).length;
   const usage = result.manifest.usage;
 
   return (
@@ -390,20 +422,33 @@ function ResultPanel({ result }: { result: AuditResult }) {
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
             Run {result.run_id}
           </p>
-          <h2 className="font-display text-2xl font-medium">Esito</h2>
+          <h2 className="font-display text-2xl font-medium">Esito verifica</h2>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={ok ? "ok" : "error"}>{result.manifest.status}</Badge>
+          {result.sample ? <Badge variant="simulazione">Simulazione</Badge> : null}
+          <Badge variant={result.blocked || fails ? "error" : "ok"}>
+            {result.blocked ? "bloccato" : fails ? `${fails} fail` : result.manifest.status}
+          </Badge>
           <Badge variant="fatto">Fatto</Badge>
         </div>
       </div>
+
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {result.checks.map((c) => (
+          <CheckRow key={c.id} check={c} />
+        ))}
+      </ul>
 
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Modello richiesto" value={result.manifest.model_requested ?? "—"} />
         <Stat label="Modello restituito" value={result.manifest.model_returned ?? "—"} />
         <Stat
           label="Latenza"
-          value={`${Math.round(result.manifest.latency_ms)} ms`}
+          value={
+            typeof result.manifest.latency_ms === "number"
+              ? `${Math.round(result.manifest.latency_ms)} ms`
+              : "—"
+          }
           tabular
         />
         <Stat
@@ -417,24 +462,12 @@ function ResultPanel({ result }: { result: AuditResult }) {
         />
       </dl>
 
-      {ok ? (
-        <article className="rounded-lg bg-paper px-4 py-3">
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-            body.txt
-          </p>
-          <p className="mt-2 text-base leading-relaxed whitespace-pre-wrap">{result.body || "—"}</p>
-        </article>
-      ) : (
-        <article className="rounded-lg bg-seal/8 px-4 py-3 text-seal">
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em]">
-            {result.manifest.error_type}
-          </p>
-          <p className="mt-2 text-sm leading-relaxed">{result.manifest.error}</p>
-        </article>
-      )}
-
-      <CopyBlock title="manifest.json" text={manifestText} />
-      {ok ? <CopyBlock title="body.txt" text={result.body} /> : null}
+      <article className="rounded-lg bg-paper px-4 py-3">
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+          body.txt
+        </p>
+        <p className="mt-2 text-base leading-relaxed whitespace-pre-wrap">{result.body || "—"}</p>
+      </article>
 
       <div className="rounded-lg bg-paper-2 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -460,8 +493,22 @@ function ResultPanel({ result }: { result: AuditResult }) {
         )}
       </div>
 
-      <CopyBlock title="Commento pronto per Issue #44" text={comment} />
+      <CopyBlock title="Commento pronto per Issue #44" text={comment} blocked={result.blocked} />
     </section>
+  );
+}
+
+function CheckRow({ check }: { check: VerifyCheck }) {
+  const tone =
+    check.ok === true ? "text-ok" : check.ok === false ? "text-seal" : "text-muted-foreground";
+  return (
+    <li className="rounded-lg bg-paper px-3 py-3">
+      <p className={cn("font-mono text-[11px] uppercase tracking-[0.12em]", tone)}>
+        {check.ok === true ? "ok" : check.ok === false ? "fail" : "n/a"} · {check.epistemic} ·{" "}
+        {check.label}
+      </p>
+      <p className="mt-1 text-sm leading-snug text-muted-foreground">{check.detail}</p>
+    </li>
   );
 }
 
@@ -479,19 +526,22 @@ function Stat({
       <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </dt>
-      <dd
-        className={cn(
-          "mt-1 break-all font-mono text-sm text-ink",
-          tabular && "tabular-nums",
-        )}
-      >
+      <dd className={cn("mt-1 break-all font-mono text-sm text-ink", tabular && "tabular-nums")}>
         {value}
       </dd>
     </div>
   );
 }
 
-function CopyBlock({ title, text }: { title: string; text: string }) {
+function CopyBlock({
+  title,
+  text,
+  blocked,
+}: {
+  title: string;
+  text: string;
+  blocked?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="overflow-hidden rounded-lg bg-ink text-paper">
@@ -499,7 +549,8 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-paper/70">{title}</p>
         <button
           type="button"
-          className="inline-flex h-9 items-center gap-1.5 rounded-md px-2 font-mono text-[11px] uppercase tracking-[0.12em] text-paper/80 hover:bg-white/8"
+          disabled={blocked}
+          className="inline-flex h-11 items-center gap-1.5 rounded-md px-2 font-mono text-[11px] uppercase tracking-[0.12em] text-paper/80 hover:bg-white/8 disabled:opacity-40"
           onClick={async () => {
             await navigator.clipboard.writeText(text);
             setCopied(true);
@@ -508,7 +559,7 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
           }}
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copiato" : "Copia"}
+          {copied ? "Copiato" : blocked ? "Bloccato" : "Copia"}
         </button>
       </div>
       <pre className="max-h-64 overflow-auto px-3 pb-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap text-paper/90">

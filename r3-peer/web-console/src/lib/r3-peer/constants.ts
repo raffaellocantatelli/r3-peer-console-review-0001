@@ -1,10 +1,11 @@
-export const PROTOCOL = "R3-PEER/1.0";
+export const PROTOCOL = "R3-PEER/1.1";
 export const CHANNEL_ID = "r3-peer-chatgpt-deepseek-20260913";
 export const TEST_ID = "R3-PEER-001";
 export const ISSUE_URL = "https://github.com/claudioterzi/Claudio/issues/44";
 export const ISSUE_HARDENING_URL = "https://github.com/claudioterzi/Claudio/issues/45";
 
 export const DEFAULT_BASE_URL = "https://api.deepseek.com";
+export const DEFAULT_MODEL = "deepseek-v4-flash";
 export const DEFAULT_MESSAGE =
   "R3-PEER test 001. Rispondi in una sola frase e identifica il modello che stai usando.";
 export const DEFAULT_MAX_TOKENS = 256;
@@ -20,34 +21,34 @@ export const PRICING_AS_OF = "2026-09-13";
 
 export const MODELS = [
   {
-    id: "deepseek-flash",
-    label: "deepseek-flash",
-    family: "flash" as const,
-    note: "ID ufficiale corrente. Serve DeepSeek-V4.1-Flash.",
-  },
-  {
     id: "deepseek-v4-flash",
     label: "deepseek-v4-flash",
     family: "flash" as const,
-    note: "Alias legacy. Instrada a V4.1-Flash, tariffa Flash.",
+    note: "Canone R3-PEER-001 (review-chatgpt-0002).",
+  },
+  {
+    id: "deepseek-flash",
+    label: "deepseek-flash",
+    family: "flash" as const,
+    note: "ID V4.1-Flash sulla pagina ufficiale. Stessa famiglia tariffaria Flash.",
   },
   {
     id: "deepseek-v4-pro",
     label: "deepseek-v4-pro",
     family: "pro" as const,
-    note: "DeepSeek-V4-Pro-0813. Più costoso; per ragionamenti complessi.",
+    note: "DeepSeek-V4-Pro-0813.",
   },
 ] as const;
 
 export type ModelId = (typeof MODELS)[number]["id"];
 export type ModelFamily = "flash" | "pro";
 
-/** USD per 1M tokens. FATTO del listino; l'applicazione al run è INFERENZA. */
+/** USD per 1M tokens. Canone Flash review-chatgpt-0002. L'applicazione al run è INFERENZA. */
 export const TARIFF_USD_PER_MILLION = {
   flash: {
-    inputCacheHit: { offPeak: 0.003, peak: 0.006 },
-    inputCacheMiss: { offPeak: 0.15, peak: 0.3 },
-    output: { offPeak: 0.6, peak: 1.2 },
+    inputCacheHit: { offPeak: 0.007, peak: 0.014 },
+    inputCacheMiss: { offPeak: 0.22, peak: 0.44 },
+    output: { offPeak: 0.66, peak: 1.32 },
   },
   pro: {
     inputCacheHit: { offPeak: 0.022, peak: 0.044 },

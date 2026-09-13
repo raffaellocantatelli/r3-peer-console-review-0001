@@ -3,12 +3,18 @@
 
 Claudio Terzi · C.Terzi
 
-PROPOSTA Issue #45 — hardening del caller canonico.
-Non è ancora su claudioterzi/Claudio@main. Da applicare sul recorder Python,
-unico processo che deve vedere la chiave.
+PROPOSTA R3-PEER/1.1 — unique Python caller. Not on claudioterzi/Claudio@main yet.
 
-Writes manifest.json, body.txt, optional request.json.
-Default: prompt not written in the clear; only hash + byte length.
+Always writes:
+  manifest.json, body.txt, request_public.json  (and response.json on success)
+
+Opt-in --save-prompt also writes:
+  request.json  (private original request, including the prompt)
+
+request_sha256 hashes the private request.
+request_public_sha256 hashes request_public.json.
+The two hashes must never be compared to each other.
+
 USD cost is never written to the manifest (INFERENZA lives in the verifier UI).
 """
 from __future__ import annotations
@@ -26,12 +32,12 @@ from pathlib import Path
 
 from openai import OpenAI
 
-PROTOCOL = "R3-PEER/1.0"
+PROTOCOL = "R3-PEER/1.1"
 TEST_ID = "R3-PEER-001"
 PRESET = {
     "r3-peer-001": {
         "message": "R3-PEER test 001. Rispondi in una sola frase e identifica il modello che stai usando.",
-        "model": "deepseek-flash",
+        "model": "deepseek-v4-flash",
         "base_url": "https://api.deepseek.com",
         "max_tokens": 256,
         "temperature": 0.2,
@@ -49,6 +55,13 @@ def sha256(data: bytes) -> str:
 
 def canonical(value) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def write_json(path: Path, value) -> None:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def redact(text: str, api_key: str | None = None) -> str:
@@ -84,7 +97,7 @@ def main() -> int:
     p.add_argument(
         "--save-prompt",
         action="store_true",
-        help="Write full request.json including the prompt. Default: hash + byte length only.",
+        help="Also write request.json with the full private prompt. request_public.json is always written.",
     )
     p.add_argument("--protocol", default=PROTOCOL)
     p.add_argument("--test-id", default=TEST_ID)
@@ -121,6 +134,7 @@ def main() -> int:
     }
     request_bytes = canonical(request_record)
     request_public = {
+        "record": "request_public",
         "base_url": base_url,
         "model": model,
         "max_tokens": max_tokens,
@@ -129,30 +143,25 @@ def main() -> int:
         "messages_utf8_bytes": len(canonical(request_record["messages"])),
         "prompt_saved": bool(args.save_prompt),
     }
-    (out / "request.json").write_text(
-        json.dumps(
-            request_record if args.save_prompt else request_public,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    public_bytes = canonical(request_public)
+
+    write_json(out / "request_public.json", request_public)
+    if args.save_prompt:
+        write_json(out / "request.json", request_record)
 
     def write_manifest(manifest: dict) -> None:
-        (out / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_json(out / "manifest.json", manifest)
         print(json.dumps({"run_dir": str(out), **manifest}, ensure_ascii=False, indent=2))
 
     base_manifest = {
+        "run_id": run_id,
         "protocol": args.protocol,
         "test_id": args.test_id,
         "base_url": base_url,
         "model_requested": model,
+        "prompt_saved": bool(args.save_prompt),
         "request_sha256": sha256(request_bytes),
+        "request_public_sha256": sha256(public_bytes),
         "note": "This proves a recorded request/response exchange with the configured endpoint; nothing more.",
     }
 
@@ -193,10 +202,7 @@ def main() -> int:
         body_source = "reasoning_content"
 
     body_bytes = body.encode("utf-8")
-    (out / "response.json").write_text(
-        json.dumps(raw, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json(out / "response.json", raw)
     (out / "body.txt").write_bytes(body_bytes)
 
     empty = len(body_bytes) == 0

@@ -20,10 +20,22 @@ export type RequestRecord = {
   temperature: number;
 };
 
+export type RequestPublicRecord = {
+  record: "request_public";
+  base_url: string;
+  model: string;
+  max_tokens: number;
+  temperature: number;
+  messages_sha256: string;
+  messages_utf8_bytes: number;
+  prompt_saved: boolean;
+};
+
 export type AuditManifest = {
   status: string;
   protocol?: string;
   test_id?: string;
+  run_id?: string;
   started_at_utc: string;
   completed_at_utc: string;
   latency_ms: number;
@@ -31,6 +43,8 @@ export type AuditManifest = {
   model_requested?: string;
   model_returned?: string | null;
   request_sha256: string;
+  request_public_sha256?: string;
+  prompt_saved?: boolean;
   response_sha256?: string;
   body_sha256?: string;
   body_utf8_bytes?: number;

@@ -1,4 +1,4 @@
-import type { ModelFamily } from "./constants";
+import type { ModelFamily } from "./constants.ts";
 
 export type Epistemic = "FATTO" | "INFERENZA" | "IPOTESI" | "SIMULAZIONE" | "PROPOSTA";
 
@@ -21,7 +21,9 @@ export type RequestRecord = {
 };
 
 export type AuditManifest = {
-  status: "ok" | "error";
+  status: string;
+  protocol?: string;
+  test_id?: string;
   started_at_utc: string;
   completed_at_utc: string;
   latency_ms: number;
@@ -32,10 +34,14 @@ export type AuditManifest = {
   response_sha256?: string;
   body_sha256?: string;
   body_utf8_bytes?: number;
+  body_empty?: boolean;
+  body_source?: string;
+  http_status?: number;
   usage?: TokenUsage;
   error_type?: string;
   error?: string;
-  note: string;
+  note?: string;
+  run_dir?: string;
 };
 
 export type CostInference = {
@@ -61,10 +67,20 @@ export type CostInference = {
   note: string;
 };
 
-export type AuditResult = {
+export type VerifyCheck = {
+  id: string;
+  epistemic: Epistemic;
+  ok: boolean | null;
+  label: string;
+  detail: string;
+};
+
+export type VerifyResult = {
   run_id: string;
   manifest: AuditManifest;
   body: string;
-  request: RequestRecord;
   cost: CostInference | null;
+  checks: VerifyCheck[];
+  blocked: boolean;
+  sample: boolean;
 };

@@ -2,6 +2,7 @@ export const PROTOCOL = "R3-PEER/1.0";
 export const CHANNEL_ID = "r3-peer-chatgpt-deepseek-20260913";
 export const TEST_ID = "R3-PEER-001";
 export const ISSUE_URL = "https://github.com/claudioterzi/Claudio/issues/44";
+export const ISSUE_HARDENING_URL = "https://github.com/claudioterzi/Claudio/issues/45";
 
 export const DEFAULT_BASE_URL = "https://api.deepseek.com";
 export const DEFAULT_MESSAGE =

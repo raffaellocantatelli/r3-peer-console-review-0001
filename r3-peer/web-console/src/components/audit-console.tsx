@@ -22,6 +22,7 @@ import {
   DEFAULT_BASE_URL,
   DEFAULT_MAX_TOKENS,
   DEFAULT_MESSAGE,
+  DEFAULT_MODEL,
   DEFAULT_TEMPERATURE,
   ISSUE_HARDENING_URL,
   ISSUE_URL,
@@ -29,7 +30,7 @@ import {
   TEST_ID,
 } from "@/lib/r3-peer/constants.ts";
 import { githubComment } from "@/lib/r3-peer/github-comment.ts";
-import { SAMPLE_BODY, SAMPLE_MANIFEST } from "@/lib/r3-peer/sample.ts";
+import { SAMPLE_BODY, SAMPLE_MANIFEST, SAMPLE_REQUEST_PUBLIC } from "@/lib/r3-peer/sample.ts";
 import { verifyRun } from "@/lib/r3-peer/verify.ts";
 import type { VerifyCheck, VerifyResult } from "@/lib/r3-peer/types.ts";
 import { cn } from "@/lib/utils";
@@ -39,8 +40,9 @@ const PYTHON_CMD = `python scripts/api_call_audit.py --preset r3-peer-001 --api-
 export function AuditConsole() {
   const [manifestText, setManifestText] = useState("");
   const [bodyText, setBodyText] = useState("");
-  const [requestText, setRequestText] = useState("");
-  const [showRequest, setShowRequest] = useState(false);
+  const [requestPublicText, setRequestPublicText] = useState("");
+  const [requestPrivateText, setRequestPrivateText] = useState("");
+  const [showPrivate, setShowPrivate] = useState(false);
   const [sample, setSample] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,8 @@ export function AuditConsole() {
       const out = await verifyRun({
         manifestText,
         bodyText,
-        requestText: showRequest ? requestText : undefined,
+        requestPublicText,
+        requestPrivateText: showPrivate ? requestPrivateText : undefined,
         sample,
       });
       setResult(out);
@@ -82,8 +85,9 @@ export function AuditConsole() {
   function loadSample() {
     setManifestText(SAMPLE_MANIFEST);
     setBodyText(SAMPLE_BODY);
-    setRequestText("");
-    setShowRequest(false);
+    setRequestPublicText(SAMPLE_REQUEST_PUBLIC);
+    setRequestPrivateText("");
+    setShowPrivate(false);
     setSample(true);
     setResult(null);
     toast("Esempio di simulazione caricato. Non è una chiamata reale.");
@@ -92,7 +96,8 @@ export function AuditConsole() {
   function clearAll() {
     setManifestText("");
     setBodyText("");
-    setRequestText("");
+    setRequestPublicText("");
+    setRequestPrivateText("");
     setSample(false);
     setResult(null);
     setError(null);
@@ -148,25 +153,37 @@ export function AuditConsole() {
               }}
             />
 
+            <PasteField
+              id="request-public"
+              label="request_public.json"
+              icon={<FileJson className="size-4" />}
+              value={requestPublicText}
+              accept=".json,application/json"
+              onChange={(v) => {
+                setRequestPublicText(v);
+                setSample(false);
+              }}
+            />
+
             <div>
               <button
                 type="button"
                 className="min-h-11 text-left text-sm text-muted-foreground underline-offset-4 hover:text-ink hover:underline"
-                onClick={() => setShowRequest((v) => !v)}
+                onClick={() => setShowPrivate((v) => !v)}
               >
-                {showRequest
-                  ? "Nascondi request.json"
-                  : "Opzionale: verifica anche request.json (solo se non contiene dati personali)"}
+                {showPrivate
+                  ? "Nascondi request.json privato"
+                  : "Opt-in: request.json privato (solo se prodotto con --save-prompt)"}
               </button>
-              {showRequest ? (
+              {showPrivate ? (
                 <div className="mt-3">
                   <PasteField
-                    id="request"
+                    id="request-private"
                     label="request.json"
                     icon={<FileJson className="size-4" />}
-                    value={requestText}
+                    value={requestPrivateText}
                     accept=".json,application/json"
-                    onChange={setRequestText}
+                    onChange={setRequestPrivateText}
                   />
                 </div>
               ) : null}
@@ -289,9 +306,10 @@ function Header({ challengeOk }: { challengeOk: boolean | null }) {
           </a>
         </div>
       </div>
-      <p className="max-w-2xl text-base leading-relaxed text-muted-foreground">
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
         Un solo caller: Python, sulla macchina che detiene la chiave. Qui si verificano hash e
-        si formatta il commento. Il costo in dollari resta un’inferenza dal listino.
+        si formatta il commento. Protocollo canone {PROTOCOL}. Il costo in dollari resta un’inferenza
+        dal listino.
       </p>
       <div className="flex flex-wrap gap-2">
         <Badge variant="fatto">Fatto</Badge>
@@ -382,13 +400,17 @@ function CallerCard() {
       </button>
       <ul className="mt-4 space-y-2 text-sm leading-relaxed text-muted-foreground">
         <li>
-          Preset: {DEFAULT_BASE_URL}, deepseek-flash, max_tokens {DEFAULT_MAX_TOKENS}, temperature{" "}
+          Preset: {DEFAULT_BASE_URL}, {DEFAULT_MODEL}, max_tokens {DEFAULT_MAX_TOKENS}, temperature{" "}
           {DEFAULT_TEMPERATURE}.
         </li>
         <li className="break-words">Messaggio: {DEFAULT_MESSAGE}</li>
         <li>
+          Sempre scritti: manifest.json, body.txt, request_public.json. Con --save-prompt anche
+          request.json (prompt in chiaro, opt-in).
+        </li>
+        <li>
           <ShieldOff className="mr-1 inline size-4 align-text-bottom" />
-          Mai la chiave, mai request.json se personale.
+          Mai la chiave. Il verifier non confronta request_public con request_sha256.
         </li>
       </ul>
     </section>

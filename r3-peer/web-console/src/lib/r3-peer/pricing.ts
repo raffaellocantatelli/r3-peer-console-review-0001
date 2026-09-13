@@ -4,8 +4,8 @@ import {
   type ModelFamily,
   PRICING_AS_OF,
   PRICING_SOURCE,
-} from "./constants";
-import type { CostInference, TokenUsage } from "./types";
+} from "./constants.ts";
+import type { CostInference, TokenUsage } from "./types.ts";
 
 export function modelFamily(modelId: string): ModelFamily {
   const known = MODELS.find((m) => m.id === modelId);
